@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Neonatal Deaths Chart</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        .chart-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            pointer-events: none;
+            visibility: hidden;
+        }
+        #chart {
+            margin: 0 auto;
+        }
+        .bar:hover {
+            fill: #1f78b4;
+        }
+        .line {
+            fill: none;
+            stroke-width: 2;
+            stroke: #e74c3c;
+        }
+        .legend {
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .dot {
+            stroke: #e74c3c;
+            stroke-width: 1px;
+            fill: #e74c3c;
+        }
+        #filters {
+            margin: 20px;
+        }
+        .slider-container {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2 class="chart-title">Impact of Major Causes on Total Mortality</h2>
+    <div id="filters">
+        <div class="slider-container">
+            <label for="min-year-slider">Start Year:</label>
+            <input type="range" id="min-year-slider" min="2000" max="2021" step="1" value="2000">
+            <span id="min-year">2000</span>
+        </div>
+        <div class="slider-container">
+            <label for="max-year-slider">End Year:</label>
+            <input type="range" id="max-year-slider" min="2000" max="2021" step="1" value="2021">
+            <span id="max-year">2021</span>
+        </div>
+        <div class="slider-container">
+            <label for="cause-select">Choose Cause:</label>
+            <select id="cause-select">
+                <option value="Prematurity">Prematurity</option>
+                <option value="Birth asphyxia/trauma">Birth asphyxia/trauma</option>
+                <option value="Congenital anomalies">Congenital anomalies</option>
+                <option value="Other neonatal deaths">Other neonatal deaths</option>
+                <option value="Sepsis">Sepsis</option>
+                <option value="Lower respiratory infections">Lower respiratory infections</option>
+                <option value="Remaining Causes">Remaining Causes</option>
+            </select>
+        </div>
+    </div>
+    <div id="chart"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const width = 1000;
+        const height = 450;
+        const margin = { top: 50, right: 200, bottom: 70, left: 50 };
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("transform", `translate(${margin.left}, ${margin.top})`);
+
+        const tooltip = d3.select("#tooltip");
+
+        const minYearSlider = d3.select("#min-year-slider");
+        const maxYearSlider = d3.select("#max-year-slider");
+        const causeSelect = d3.select("#cause-select");
+
+        d3.json("Doughnut.json").then(data => {
+            const years = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
+
+            let filteredYears = years;
+
+            function filterData() {
+                const minYear = parseInt(minYearSlider.property("value"), 10);
+                const maxYear = parseInt(maxYearSlider.property("value"), 10);
+
+                if (minYear > maxYear) {
+                    alert("Start year must be less than or equal to end year.");
+                    return;
+                }
+
+                d3.select("#min-year").text(minYear);
+                d3.select("#max-year").text(maxYear);
+
+                filteredYears = years.filter(year => parseInt(year, 10) >= minYear && parseInt(year, 10) <= maxYear);
+
+                updateChart();
+            }
+
+            minYearSlider.on("input", filterData);
+            maxYearSlider.on("input", filterData);
+            causeSelect.on("change", updateChart); // Listen for changes in the selected cause
+
+            // Calculate the percentage of total deaths for the selected cause
+            const calculatePercentage = (causeDeaths, totalDeaths) => {
+                return (causeDeaths / totalDeaths) * 100;
+            };
+
+            function showTooltip(event, data, isBarChart) {
+                tooltip.style("visibility", "visible")
+                    .text(`${data.year}: ${data.totalDeaths} total deaths, ${data.causeDeaths} for ${data.cause}`);
+                
+                if (isBarChart) {
+                    tooltip.style("top", `${event.pageY + 10}px`)
+                        .style("left", `${event.pageX + 10}px`);
+                } else {
+                    tooltip.style("top", `${event.pageY - 30}px`)
+                        .style("left", `${event.pageX + 10}px`);
+                }
+            }
+
+            function hideTooltip() {
+                tooltip.style("visibility", "hidden");
+            }
+
+            function updateChart() {
+                svg.selectAll("*").remove();
+
+                const totalDeathsData = filteredYears.map((year, i) => ({
+                    year: year,
+                    totalDeaths: data.reduce((sum, d) => sum + d[i + 1], 0),
+                    causeDeaths: 0, // This will be updated later for the selected cause
+                    cause: ""
+                }));
+
+                const selectedCause = causeSelect.property("value");
+                let causeIndex = 0;
+                switch (selectedCause) {
+                    case "Birth asphyxia/trauma":
+                        causeIndex = 1;
+                        break;
+                    case "Congenital anomalies":
+                        causeIndex = 2;
+                        break;
+                    case "Other neonatal deaths":
+                        causeIndex = 3;
+                        break;
+                    case "Sepsis":
+                        causeIndex = 4;
+                        break;
+                    case "Lower respiratory infections":
+                        causeIndex = 5;
+                        break;
+                    case "Remaining Causes":
+                        causeIndex = 6;
+                        break;
+                    default:
+                        causeIndex = 0; // Default to Prematurity
+                        break;
+                }
+
+                const causeData = filteredYears.map((year, i) => ({
+                    year: year,
+                    causeDeaths: data[causeIndex][i + 1],
+                    cause: selectedCause
+                }));
+
+                // Update the total deaths data with the selected cause data
+                totalDeathsData.forEach((dataItem, i) => {
+                    dataItem.causeDeaths = causeData[i].causeDeaths;
+                    dataItem.cause = causeData[i].cause;
+                });
+
+                const x = d3.scaleBand()
+                    .domain(filteredYears)
+                    .range([0, width - margin.left - margin.right])
+                    .padding(0.2);
+
+                const yLeft = d3.scaleLinear()
+                    .domain([0, d3.max(totalDeathsData, d => d.totalDeaths)])
+                    .nice()
+                    .range([height - margin.top - margin.bottom, 0]);
+
+                const yRight = d3.scaleLinear()
+                    .domain([0, d3.max(causeData, d => d.causeDeaths)])
+                    .nice()
+                    .range([height - margin.top - margin.bottom, 0]);
+
+                const xAxis = d3.axisBottom(x);
+                const yAxisLeft = d3.axisLeft(yLeft);
+                const yAxisRight = d3.axisRight(yRight);
+
+                svg.append("g")
+                    .attr("class", "x axis")
+                    .attr("transform", `translate(0, ${height - margin.top - margin.bottom})`)
+                    .call(xAxis);
+
+                svg.append("g")
+                    .attr("class", "y axis left")
+                    .call(yAxisLeft);
+
+                svg.append("g")
+                    .attr("class", "y axis right")
+                    .attr("transform", `translate(${width - margin.left - margin.right}, 0)`)
+                    .call(yAxisRight);
+
+                svg.selectAll(".bar")
+                    .data(totalDeathsData)
+                    .enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("x", d => x(d.year))
+                    .attr("y", height - margin.top - margin.bottom)
+                    .attr("width", x.bandwidth())
+                    .attr("height", 0)
+                    .attr("fill", "#1f78b4") // Set the bar color to blue
+                    .on("mouseover", function(event, d) {
+                        showTooltip(event, d, true);
+                    })
+                    .on("mouseout", hideTooltip)
+                    .transition()
+                    .duration(1500)
+                    .delay((d, i) => i * 200) // Delays animation for each bar
+                    .attr("y", d => yLeft(d.totalDeaths))
+                    .attr("height", d => height - margin.top - margin.bottom - yLeft(d.totalDeaths));
+
+                const line = d3.line()
+                    .x(d => x(d.year) + x.bandwidth() / 2)
+                    .y(d => yRight(d.causeDeaths));
+
+                const path = svg.append("path")
+                    .datum(causeData)
+                    .attr("class", "line")
+                    .attr("d", line)
+                    .style("stroke-dasharray", function() {
+                        const totalLength = this.getTotalLength();
+                        return `${totalLength} ${totalLength}`;
+                    })
+                    .style("stroke-dashoffset", function() {
+                        return this.getTotalLength();
+                    });
+
+                path.transition()
+                    .duration(5500)
+                    .ease(d3.easeLinear)
+                    .style("stroke-dashoffset", 0);
+
+                svg.selectAll(".dot")
+                    .data(causeData)
+                    .enter()
+                    .append("circle")
+                    .attr("class", "dot")
+                    .attr("cx", d => x(d.year) + x.bandwidth() / 2) // Initial position
+                    .attr("cy", height - margin.top - margin.bottom) // Start from bottom
+                    .attr("r", 5)
+                    .style("fill", "#e74c3c")
+                    .on("mouseover", function(event, d) {
+                        showTooltip(event, d, false);
+                    })
+                    .on("mouseout", hideTooltip)
+                    .transition()
+                    .duration(1500)  // Match animation duration
+                    .delay((d, i) => i * 200) // Delay for each dot
+                    .attr("cy", d => yRight(d.causeDeaths));
+
+                // Add or update the legend
+                svg.selectAll(".legend").remove(); // Clear any existing legend
+
+                const legend = svg.append("g")
+                    .attr("class", "legend")
+                    .attr("transform", `translate(${width - margin.right + 20}, ${margin.top})`);
+
+                legend.append("rect")
+                    .attr("x", -800)
+                    .attr("y", 310)
+                    .attr("width", 20)
+                    .attr("height", 10)
+                    .attr("fill", "#1f78b4"); // Color for the bars
+
+                legend.append("text")
+                    .attr("x", -770)
+                    .attr("y", 320)
+                    .attr("text-anchor", "start")
+                    .style("font-size", "14px")
+                    .text("Total Deaths");
+
+                legend.append("line")
+                    .attr("x1", -780)
+                    .attr("x2", -800)
+                    .attr("y1", 340)
+                    .attr("y2", 340)
+                    .attr("stroke", "#e74c3c")
+                    .attr("stroke-width", 2); // Line for the selected cause
+
+                legend.append("text")
+                    .attr("x", -770)
+                    .attr("y", 340)
+                    .attr("text-anchor", "start")
+                    .style("font-size", "14px")
+                    .text(`Cause: ${selectedCause}`);
+            }
+
+            updateChart();
+        });
+    </script>
+</body>
+</html>

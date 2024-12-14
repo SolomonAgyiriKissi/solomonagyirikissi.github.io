@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neonatal Mortality in Fiji</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f9f9f9;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 90%;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            border-radius: 8px;
+        }
+
+        h2 {
+            text-align: center;
+            font-size: 22px;
+            margin-bottom: 20px;
+        }
+
+        .axis text {
+            font-size: 12px;
+        }
+
+        .bar {
+            transition: all 0.5s ease;
+        }
+
+        .year-heading {
+            font-size: 20px;
+            font-weight: bold;
+            fill: #333;
+        }
+
+        .label {
+            font-size: 10px;
+            fill: black;
+        }
+
+        #chart-container {
+            margin-bottom: 20px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        button, select {
+            padding: 8px 12px;
+            font-size: 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>MAJOR CAUSES</h2>
+        <div id="chart-container"></div>
+        <div class="controls">
+            <button id="play-pause">Play</button>
+            <select id="year-selector">
+                <option value="all" selected disabled>Select Year</option>
+            </select>
+        </div>
+    </div>
+    <script>
+        // Chart dimensions
+        const margin = { top: 20, right: 120, bottom: 30, left: 155 };
+        const width = 750 - margin.left - margin.right;
+        const height = 450 - margin.top - margin.bottom;
+
+        // SVG setup
+        const svg = d3.select("#chart-container")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        let animationInterval;
+        let currentYearIndex = 0;
+        let isAnimating = false;
+
+        // Load JSON data
+        d3.json("Neonatal Mortality_Fiji.json").then(data => {
+            // Pre-process data
+            const formattedData = data.map(row => ({
+                Country: row[1],
+                Cause: row[3],
+                Year: +row[4],
+                Deaths: +row[5]
+            }));
+
+            const groupedData = d3.group(formattedData, d => d.Year);
+            const years = Array.from(groupedData.keys()).sort((a, b) => a - b);
+
+            // Populate year selector
+            const yearSelector = d3.select("#year-selector");
+            years.forEach(year => {
+                yearSelector.append("option")
+                    .attr("value", year)
+                    .text(year);
+            });
+
+            // Scales
+            const xScale = d3.scaleLinear().range([0, width]);
+            const yScale = d3.scaleBand().range([0, height]).padding(0.2); // Reduced padding for thinner bars
+
+            // Define gradient colors
+            const gradientColors = d3.scaleLinear()
+                .domain([0, 9])
+                .range(["#081d58", "#c7e9b4"]); // Blue to green gradient
+
+            // Axes
+            const xAxis = svg.append("g").attr("transform", `translate(0,${height})`);
+            const yAxis = svg.append("g");
+
+            // Year heading (added to the right side of the chart)
+            const yearHeading = svg.append("text")
+                .attr("class", "year-heading")
+                .attr("x", width + 50) // Position to the right of the chart
+                .attr("y", height / 2) // Vertically centered
+                .attr("text-anchor", "middle");
+
+            // Update chart
+            function updateChart(year) {
+                const yearData = groupedData.get(year) || [];
+                const sortedData = yearData.sort((a, b) => b.Deaths - a.Deaths); // Sort data by Deaths
+
+                // Adjust height dynamically based on data
+                yScale.range([0, Math.max(sortedData.length * 18, height)]); // Reduced height per bar
+                svg.attr("height", Math.max(sortedData.length * 18 + margin.top + margin.bottom, 500));
+
+                // Add buffer to the x-axis domain for space
+                xScale.domain([0, d3.max(sortedData, d => d.Deaths) * 1.1]);
+                yScale.domain(sortedData.map(d => d.Cause));
+
+                // Bars
+                const bars = svg.selectAll(".bar").data(sortedData, d => d.Cause);
+
+                bars.enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("x", 0)
+                    .attr("y", d => yScale(d.Cause))
+                    .attr("height", yScale.bandwidth()) // Bars will be thinner
+                    .merge(bars)
+                    .transition()
+                    .duration(1000)
+                    .attr("width", d => xScale(d.Deaths))
+                    .attr("y", d => yScale(d.Cause))
+                    .attr("fill", (d, i) => gradientColors(i));
+
+                bars.exit().remove();
+
+                // Hover effect
+                bars.on("mouseover", function(event, d) {
+                    const top3 = sortedData.slice(0, 3); // Top 3 causes by deaths
+                    d3.select(this)
+                        .style("fill", top3.includes(d) ? "#ff0000" : "#ffa500") // Red for top 3, amber for others
+                        .style("cursor", "pointer");
+                });
+
+                bars.on("mouseout", function(event, d) {
+                    const index = sortedData.indexOf(d);
+                    d3.select(this).style("fill", gradientColors(index)); // Reset original color
+                });
+
+                // Data labels
+                const labels = svg.selectAll(".label").data(sortedData, d => d.Cause);
+
+                labels.enter()
+                    .append("text")
+                    .attr("class", "label")
+                    .merge(labels)
+                    .transition()
+                    .duration(1000)
+                    .attr("x", d => xScale(d.Deaths) + 5)
+                    .attr("y", d => yScale(d.Cause) + yScale.bandwidth() / 2)
+                    .attr("dy", "0.35em")
+                    .text(d => d.Deaths.toLocaleString());
+
+                labels.exit().remove();
+
+                // Update year heading
+                yearHeading.text(year);
+
+                // Update axes
+                xAxis.call(d3.axisBottom(xScale).ticks(6));
+                yAxis.call(d3.axisLeft(yScale))
+                    .selectAll("text")
+                    .style("font-size", "12px");
+            }
+
+            // Animation controls
+            function startAnimation() {
+                isAnimating = true;
+                animationInterval = setInterval(() => {
+                    updateChart(years[currentYearIndex]);
+                    currentYearIndex = (currentYearIndex + 1) % years.length;
+                }, 2000);
+                d3.select("#play-pause").text("Pause");
+            }
+
+            function stopAnimation() {
+                clearInterval(animationInterval);
+                isAnimating = false;
+                d3.select("#play-pause").text("Play");
+            }
+
+            // Event listeners
+            d3.select("#play-pause").on("click", function() {
+                if (isAnimating) {
+                    stopAnimation();
+                } else {
+                    startAnimation();
+                }
+            });
+
+            yearSelector.on("change", event => {
+                stopAnimation();
+                const selectedYear = +event.target.value;
+                updateChart(selectedYear);
+            });
+
+            // Initial chart
+            updateChart(years[0]);
+        });
+    </script>
+</body>
+</html>

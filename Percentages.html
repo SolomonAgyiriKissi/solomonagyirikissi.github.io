@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neonatal Deaths Donut Chart</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        .chart-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .legend {
+            position: absolute;
+            right: 20px;
+            top: 100px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+        }
+        .legend-item.highlight {
+            font-weight: bold;
+            background-color: #f0f0f0;
+        }
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            pointer-events: none;
+            visibility: hidden;
+        }
+        #total-text {
+            font-size: 22px;
+            font-weight: bold;
+            text-anchor: middle;
+            fill: #333;
+        }
+
+        /* Shadow effects */
+        .slice {
+            filter: drop-shadow(2px 2px 5px rgba(0, 0, 0, 0.3));
+        }
+
+        .highlight {
+            font-weight: bold;
+            background-color: #f0f0f0;
+        }
+
+        /* Added subtle shadow to the legend items */
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2 class="chart-title">Percentage Contributions Of Each Cause</h2>
+    <div>
+        <select id="yearSelector">
+            <option value="ALL">ALL</option>
+        </select>
+    </div>
+    <div id="chart"></div>
+    <div class="legend" id="legend"></div>
+    <div class="tooltip" id="tooltip"></div>
+    <div>
+        <button id="startAnimation" style="margin: 20px;">Start Animation</button>
+        <button id="pauseAnimation" style="margin: 20px; display: none;">Pause Animation</button>
+    </div>
+
+    <script>
+        const width = 600;
+        const height = 400;
+        const radius = Math.min(width, height) / 2.35;
+        const innerRadius = radius / 2.0;
+        const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("transform", `translate(${width / 2}, ${height / 2})`);
+
+        const tooltip = d3.select("#tooltip");
+        let explodedSlice = null;
+        let allData;
+        let isAnimating = false;
+        let animationInterval;
+        let currentYearIndex = 0;
+
+        const yearSelector = d3.select("#yearSelector");
+
+        const totalText = svg.append("text")
+            .attr("id", "total-text")
+            .attr("y", 10)
+            .text("");
+
+        d3.json("Doughnut.json").then(data => {
+            allData = data;
+            const years = data[0].slice(1).map((_, i) => (2000 + i).toString());
+
+            yearSelector.selectAll("option")
+                .data(["ALL", ...years])
+                .enter()
+                .append("option")
+                .text(d => d);
+
+            updateChart("ALL");
+
+            yearSelector.on("change", function () {
+                const selectedYear = this.value;
+                if (isAnimating) pauseAnimation();
+                updateChart(selectedYear);
+            });
+
+            document.getElementById("startAnimation").addEventListener("click", startAnimation);
+            document.getElementById("pauseAnimation").addEventListener("click", pauseAnimation);
+        });
+
+        function updateChart(selectedYear) {
+            const pieData = selectedYear === "ALL"
+                ? allData.map(d => ({
+                    cause: d[0],
+                    value: d.slice(1).reduce((sum, v) => sum + v, 0)
+                }))
+                : allData.map(d => ({
+                    cause: d[0],
+                    value: d[+selectedYear - 2000 + 1]
+                }));
+
+            const total = pieData.reduce((sum, d) => sum + d.value, 0);
+
+            totalText.text(`Total: ${total}`);
+
+            const pie = d3.pie().value(d => d.value);
+            const arc = d3.arc().innerRadius(innerRadius).outerRadius(radius);
+            const arcHover = d3.arc().innerRadius(innerRadius).outerRadius(radius + 10);
+
+            const slices = svg.selectAll(".slice")
+                .data(pie(pieData), d => d.data.cause);
+
+            slices.enter()
+                .append("path")
+                .attr("class", "slice")
+                .attr("d", arc)
+                .attr("fill", d => color(d.data.cause))
+                .attr("class", "slice") // Added shadow to slice
+                .on("mouseover", function (event, d) {
+                    tooltip.style("visibility", "visible")
+                        .html(`
+                            <strong>${d.data.cause}</strong><br>
+                            Value: ${d.data.value}<br>                            
+                        `)
+                        .style("top", `${event.pageY - 10}px`)
+                        .style("left", `${event.pageX + 10}px`);
+                    d3.select(this).transition().duration(300).attr("d", arcHover);
+                })
+                .on("mousemove", function (event) {
+                    tooltip.style("top", `${event.pageY - 10}px`)
+                        .style("left", `${event.pageX + 10}px`);
+                })
+                .on("mouseout", function () {
+                    tooltip.style("visibility", "hidden");
+                    d3.select(this).transition().duration(300).attr("d", arc);
+                })
+                .on("click", function (event, d) {
+                    const slice = d3.select(this);
+                    const isExploded = slice.classed("exploded");
+
+                    if (isExploded) {
+                        slice.transition().duration(500).attr("transform", "translate(0,0)");
+                        slice.classed("exploded", false);
+                        explodedSlice = null;
+
+                        // Remove legend highlight
+                        d3.selectAll(".legend-item").classed("highlight", false);
+                    } else {
+                        if (explodedSlice) {
+                            d3.select(explodedSlice).transition().duration(500).attr("transform", "translate(0,0)");
+                            d3.select(explodedSlice).classed("exploded", false);
+                        }
+
+                        const angle = (d.startAngle + d.endAngle) / 2;
+                        const x = Math.sin(angle) * 20;
+                        const y = -Math.cos(angle) * 20;
+                        slice.transition().duration(500).attr("transform", `translate(${x},${y})`);
+                        slice.classed("exploded", true);
+                        explodedSlice = this;
+
+                        d3.selectAll(".legend-item").classed("highlight", false);
+                        d3.selectAll(".legend-item").filter(item => item.cause === d.data.cause)
+                            .classed("highlight", true);
+                    }
+                })
+                .merge(slices)
+                .transition()
+                .duration(500)
+                .attr("d", arc);
+
+            slices.exit().remove();
+
+            updateLegend(pieData, total);
+        }
+
+        function updateLegend(data, total) {
+            const legend = d3.select("#legend").selectAll(".legend-item")
+                .data(data, d => d.cause);
+
+            const legendEnter = legend.enter()
+                .append("div")
+                .attr("class", "legend-item");
+
+            legendEnter.append("div")
+                .attr("class", "legend-color")
+                .style("background-color", d => color(d.cause));
+
+            legendEnter.append("span")
+                .text(d => `${d.cause}: ${(d.value / total * 100).toFixed(2)}%`);
+
+            legend.select("span")
+                .text(d => `${d.cause}: ${(d.value / total * 100).toFixed(2)}%`);
+
+            legend.exit().remove();
+        }
+
+        function startAnimation() {
+            isAnimating = true;
+            document.getElementById("startAnimation").style.display = "none";
+            document.getElementById("pauseAnimation").style.display = "inline";
+
+            animationInterval = setInterval(() => {
+                currentYearIndex = (currentYearIndex + 1) % (allData[0].length - 1);
+                const year = 2000 + currentYearIndex;
+                updateChart(year.toString());
+                yearSelector.property("value", year.toString());
+            }, 2000);
+        }
+
+        function pauseAnimation() {
+            isAnimating = false;
+            document.getElementById("startAnimation").style.display = "inline";
+            document.getElementById("pauseAnimation").style.display = "none";
+            clearInterval(animationInterval);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neonatal Deaths Trends</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        .chart-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 5px;
+            border-radius: 3px;
+            box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+        }
+
+        .grid line {
+            stroke: #e0e0e0;
+        }
+
+        .grid path {
+            stroke: none;
+        }
+
+        .dot {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+
+        .highlight {
+            stroke: orange;
+            stroke-width: 3px;
+        }
+
+        .exploded {
+            stroke: darkred;
+            stroke-width: 2px;
+        }
+
+
+        .annotation {
+            font-size: 12px;
+            font-weight: bold;
+            fill: darkred;
+        }
+
+        .annotation-line {
+            stroke: darkred;
+            stroke-width: 1;
+            stroke-dasharray: 4;
+        }
+
+        
+
+        .controls {
+            margin-top: 20px;
+            margin-left: -100px; /* Adjust this value to move the button left */
+        }
+
+        .button {
+            padding: 10px 20px;
+            margin: 5px;
+            background-color: orange;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h2 class="chart-title">Total Neonatal Mortality Trends</h2>
+    <div id="chart"></div>
+    <div class="controls">
+        <button id="toggle" class="button">Play</button>
+    </div>
+    <div class="tooltip" id="tooltip"></div>
+    <script>
+        const margin = { top: 30, right: 150, bottom: 50, left: 60 };
+        const width = 800 - margin.left - margin.right;
+        const height = 400 - margin.top - margin.bottom;
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const tooltip = d3.select("#tooltip");
+
+        const toggleButton = document.getElementById("toggle");
+
+        let pathLength;
+        let remainingDashOffset;
+        let isPlaying = false;
+
+        d3.json("Neonatal Mortality_Fiji.json").then(data => {
+            // Data preprocessing
+            const formattedData = data.map(d => ({
+                year: +d[4],
+                totalDeaths: +d[5]
+            })).reduce((acc, curr) => {
+                const yearIndex = acc.findIndex(item => item.year === curr.year);
+                if (yearIndex > -1) {
+                    acc[yearIndex].totalDeaths += curr.totalDeaths;
+                } else {
+                    acc.push(curr);
+                }
+                return acc;
+            }, []);
+
+            const x = d3.scaleLinear()
+                .domain(d3.extent(formattedData, d => d.year))
+                .range([0, width]);
+
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(formattedData, d => d.totalDeaths) * 1.1])
+                .range([height, 0]);
+
+            // Add gridlines
+            svg.append("g")
+                .attr("class", "grid")
+                .call(d3.axisLeft(y).tickSize(-width).tickFormat(""));
+
+            svg.append("g")
+                .attr("class", "grid")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x).tickSize(-height).tickFormat(""));
+
+            // Gradient for line
+            const gradient = svg.append("defs")
+                .append("linearGradient")
+                .attr("id", "line-gradient")
+                .attr("gradientUnits", "userSpaceOnUse")
+                .attr("x1", 0)
+                .attr("x2", width)
+                .selectAll("stop")
+                .data([
+                    { offset: "0%", color: "blue" },
+                    { offset: "100%", color: "orange" }
+                ])
+                .enter()
+                .append("stop")
+                .attr("offset", d => d.offset)
+                .attr("stop-color", d => d.color);
+
+            // Line generator
+            const line = d3.line()
+                .x(d => x(d.year))
+                .y(d => y(d.totalDeaths))
+                .curve(d3.curveMonotoneX);
+
+            // Area under line
+            svg.append("path")
+                .datum(formattedData)
+                .attr("fill", "url(#line-gradient)")
+                .attr("opacity", 0.2)
+                .attr("d", d3.area()
+                    .x(d => x(d.year))
+                    .y0(height)
+                    .y1(d => y(d.totalDeaths))
+                );
+
+            const path = svg.append("path")
+                .datum(formattedData)
+                .attr("fill", "none")
+                .attr("stroke", "url(#line-gradient)")
+                .attr("stroke-width", 2)
+                .attr("d", line);
+
+            pathLength = path.node().getTotalLength();
+            path.attr("stroke-dasharray", pathLength)
+                .attr("stroke-dashoffset", pathLength);
+
+            const animateLine = () => {
+                const duration = 4000 * ((remainingDashOffset || pathLength) / pathLength);
+                path.transition()
+                    .duration(duration)
+                    .ease(d3.easeLinear)
+                    .attr("stroke-dashoffset", 0)
+                    .on("end", () => {
+                        if (isPlaying) {
+                            path.attr("stroke-dashoffset", pathLength);
+                            remainingDashOffset = pathLength;
+                            animateLine();
+                        }
+                    });
+            };
+
+            toggleButton.addEventListener("click", () => {
+                if (isPlaying) {
+                    path.interrupt(); // Stop the animation
+                    remainingDashOffset = parseFloat(path.attr("stroke-dashoffset")); // Save progress
+                    isPlaying = false;
+                    toggleButton.textContent = "Play";
+                } else {
+                    if (remainingDashOffset == null) {
+                        remainingDashOffset = pathLength; // Reset for a fresh start
+                    }
+                    path.attr("stroke-dashoffset", remainingDashOffset);
+                    animateLine(); // Start or resume the animation
+                    isPlaying = true;
+                    toggleButton.textContent = "Pause";
+                }
+            });
+
+            // Dots with tooltip and click to explode
+            svg.selectAll(".dot")
+                .data(formattedData)
+                .enter()
+                .append("circle")
+                .attr("class", "dot")
+                .attr("cx", d => x(d.year))
+                .attr("cy", d => y(d.totalDeaths))
+                .attr("r", 5)
+                .attr("fill", "orange")
+                .on("mouseover", (event, d) => {
+                    tooltip.style("display", "block")
+                        .html(`Year: ${d.year}<br>Total Deaths: ${d.totalDeaths}`);
+                })
+                .on("mousemove", (event) => {
+                    tooltip.style("left", `${event.pageX + 10}px`)
+                        .style("top", `${event.pageY + 10}px`);
+                })
+                .on("mouseout", () => {
+                    tooltip.style("display", "none");
+                })
+                .on("click", function(event, d) {
+                    const isExploded = d3.select(this).classed("exploded");
+                    d3.selectAll(".dot").classed("exploded", false) // Reset others
+                        .attr("r", 5)
+                        .attr("stroke", "none")
+                        .attr("transform", "translate(0,0)");
+                    if (!isExploded) {
+                        d3.select(this).classed("exploded", true)
+                            .attr("r", 10)
+                            .attr("stroke", "darkred")
+                            .attr("stroke-width", 2)
+                            .attr("transform", "translate(5,-5)"); // Pop out effect
+                    }
+                });
+
+            // Axes
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x).tickFormat(d3.format("d")));
+
+            svg.append("g")
+                .call(d3.axisLeft(y));
+
+            // Annotations
+            const maxYearData = formattedData.reduce((max, d) => (d.totalDeaths > max.totalDeaths ? d : max), formattedData[0]);
+            const minYearData = formattedData.reduce((min, d) => (d.totalDeaths < min.totalDeaths ? d : min), formattedData[0]);
+
+            const addAnnotation = (data, text) => {
+                svg.append("line")
+                    .attr("class", "annotation-line")
+                    .attr("x1", x(data.year))
+                    .attr("x2", x(data.year))
+                    .attr("y1", y(data.totalDeaths))
+                    .attr("y2", height)
+                    .attr("stroke", "darkred");
+
+                svg.append("text")
+                    .attr("class", "annotation")
+                    .attr("x", x(data.year) + 10) // Shift text position for better visibility
+                    .attr("y", y(data.totalDeaths) - 10)
+                    .text(`${text}: ${data.year} (${data.totalDeaths})`);
+            };
+
+            addAnnotation(maxYearData, "Highest");
+            addAnnotation(minYearData, "Lowest");
+        });
+    </script>
+</body>
+</html>
